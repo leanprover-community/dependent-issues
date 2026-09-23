@@ -88,9 +88,18 @@ type RawIssue = {
 };
 
 function isRetryable(error: any) {
-	// Don't retry on GraphQL errors, or on client errors
-	if (error?.errors || (error?.status >= 400 && error?.status < 500)) {
+	// Client errors (bad credentials, ...) won't go away
+	if (error?.status >= 400 && error?.status < 500) {
 		return false;
+	}
+
+	// GraphQL errors about the data (NOT_FOUND, FORBIDDEN, ...) carry a
+	// `type` and are handled by the caller. Errors without one are
+	// server-side failures, which GitHub reports with a 200 status, e.g.
+	// "Something went wrong while executing your query. This may be the
+	// result of a timeout, or it could be a GitHub bug."
+	if (Array.isArray(error?.errors)) {
+		return error.errors.some((e: any) => !e?.type);
 	}
 
 	return true;

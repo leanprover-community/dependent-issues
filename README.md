@@ -108,7 +108,7 @@ Here how it can look like in practice:
 
 ## API usage
 
-The action reads the state of all open PRs (and issues, if `check_issues` is on), including their labels, comments and commit statuses, through a small number of paginated GraphQL requests (roughly one per 50 PRs/issues). The state of dependencies outside that set, including cross-repository ones, is looked up in batches of up to 100 per request. REST API calls are only made when something needs to change: a label, a comment or a commit status. These are spaced at least a second apart, and retried when GitHub reports a rate limit.
+The action reads the state of all open PRs (and issues, if `check_issues` is on), including their labels, comments and commit statuses, through a small number of paginated GraphQL requests (roughly one per 50 PRs/issues). The state of dependencies outside that set, including cross-repository ones, is looked up in batches of up to 100 per request. GraphQL requests that time out are retried with smaller pages. REST API calls are only made when something needs to change: a label, a comment or a commit status. These are spaced at least a second apart, and retried when GitHub reports a rate limit.
 
 This keeps the action usable on repositories with thousands of open PRs, even when run on a frequent schedule.
 
