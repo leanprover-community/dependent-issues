@@ -3,7 +3,7 @@ import * as core from '@actions/core';
 import * as github from '@actions/github';
 
 // Ours
-import { ActionContext, GithubClient, Issue } from './types';
+import { ActionContext, Issue } from './types';
 import { fetchOpenIssue, fetchOpenIssues } from './github';
 import { installHooks } from './octokit';
 
@@ -42,16 +42,14 @@ export async function getActionContext(): Promise<ActionContext> {
 	}
 
 	const client = installHooks(
-		github.getOctokit(
-			process.env.GITHUB_TOKEN
-		) as unknown as GithubClient,
+		github.getOctokit(process.env.GITHUB_TOKEN),
 		{ dryRun }
 	);
 
 	const readOnlyClient = installHooks(
 		github.getOctokit(
 			process.env.GITHUB_READ_TOKEN || process.env.GITHUB_TOKEN
-		) as unknown as GithubClient,
+		),
 		{ dryRun }
 	);
 

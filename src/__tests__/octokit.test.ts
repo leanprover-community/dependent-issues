@@ -1,4 +1,4 @@
-import { Octokit } from '@octokit/rest';
+import { getOctokit } from '@actions/github';
 
 // Ours
 import { installHooks, retryDelay } from '../octokit';
@@ -11,20 +11,18 @@ jest.mock('@actions/core', () => ({
 const response = (
 	status: number,
 	headers: Record<string, string> = {}
-) => ({
-	status,
-	headers: new Map(Object.entries(headers)),
-	url: 'https://api.github.com',
-	ok: status < 400,
-	text: async () =>
-		status < 400
-			? '{}'
-			: '{"message":"You have exceeded a secondary rate limit"}',
-	json: async () =>
-		status < 400
-			? {}
-			: { message: 'You have exceeded a secondary rate limit' },
-});
+) =>
+	new Response(
+		JSON.stringify(
+			status < 400
+				? {}
+				: { message: 'You have exceeded a secondary rate limit' }
+		),
+		{
+			status,
+			headers: { 'content-type': 'application/json', ...headers },
+		}
+	);
 
 function client(fetch: jest.Mock, options = {}) {
 	const time = { now: 0 };
@@ -32,11 +30,14 @@ function client(fetch: jest.Mock, options = {}) {
 		time.now += ms;
 	});
 
-	const gh = installHooks(new Octokit({ request: { fetch } }) as any, {
-		sleep,
-		now: () => time.now,
-		...options,
-	});
+	const gh = installHooks(
+		getOctokit('<token>', { request: { fetch } }),
+		{
+			sleep,
+			now: () => time.now,
+			...options,
+		}
+	);
 
 	return { gh, sleep };
 }
@@ -51,7 +52,9 @@ const addLabel = (gh: any) =>
 
 describe('installHooks', () => {
 	it('skips writes in dry-run mode', async () => {
-		const fetch = jest.fn().mockResolvedValue(response(200));
+		const fetch = jest
+			.fn()
+			.mockImplementation(async () => response(200));
 		const { gh } = client(fetch, { dryRun: true });
 
 		await addLabel(gh);
@@ -67,7 +70,9 @@ describe('installHooks', () => {
 	});
 
 	it('spaces out writes', async () => {
-		const fetch = jest.fn().mockResolvedValue(response(200));
+		const fetch = jest
+			.fn()
+			.mockImplementation(async () => response(200));
 		const { gh, sleep } = client(fetch);
 
 		await addLabel(gh);
@@ -81,7 +86,7 @@ describe('installHooks', () => {
 		const fetch = jest
 			.fn()
 			.mockResolvedValueOnce(response(403, { 'retry-after': '30' }))
-			.mockResolvedValue(response(200));
+			.mockImplementation(async () => response(200));
 		const { gh, sleep } = client(fetch);
 
 		await addLabel(gh);
@@ -93,7 +98,9 @@ describe('installHooks', () => {
 	it('gives up after a few retries', async () => {
 		const fetch = jest
 			.fn()
-			.mockResolvedValue(response(403, { 'retry-after': '1' }));
+			.mockImplementation(async () =>
+				response(403, { 'retry-after': '1' })
+			);
 		const { gh } = client(fetch);
 
 		await expect(addLabel(gh)).rejects.toThrow();

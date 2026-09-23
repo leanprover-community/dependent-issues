@@ -1,7 +1,6 @@
-import { Octokit } from '@octokit/rest';
 import * as github from '@actions/github';
 
-export type GithubClient = Octokit;
+export type GithubClient = ReturnType<typeof github.getOctokit>;
 
 export type Comment = {
 	id: number;
