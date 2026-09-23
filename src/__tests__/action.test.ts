@@ -27,6 +27,7 @@ jest.mock('@actions/core', () => {
 
 jest.mock('@actions/github', () => {
 	gh = {
+		hook: { wrap: jest.fn() },
 		graphql: jest.fn() as any,
 		rest: {
 			issues: {

@@ -1,6 +1,6 @@
 name: Dependent Issues
 description: Mark issues as dependent on another
-author: Ahmed T. Ali
+author: Ahmed T. Ali, leanprover-community
 
 branding:
   icon: box
@@ -26,6 +26,11 @@ inputs:
     required: false
     description: Set a commit status on the head commit of PRs. Disable by setting the value to "off".
     default: on
+
+  dry_run:
+    required: false
+    description: Log the changes that would be made (labels, comments, commit statuses) without making them. Enable by setting the value to "on".
+    default: off
 
   keywords:
     required: false

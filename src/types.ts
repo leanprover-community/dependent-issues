@@ -42,6 +42,7 @@ export type Config = {
 	check_issues: string;
 	ignore_dependabot: string;
 	commit_status: string;
+	dry_run: string;
 	keywords: string[];
 };
 

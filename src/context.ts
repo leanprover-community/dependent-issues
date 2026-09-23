@@ -5,6 +5,7 @@ import * as github from '@actions/github';
 // Ours
 import { ActionContext, GithubClient, Issue } from './types';
 import { fetchOpenIssue, fetchOpenIssues } from './github';
+import { installHooks } from './octokit';
 
 export async function getActionContext(): Promise<ActionContext> {
 	core.startGroup('Context');
@@ -18,6 +19,7 @@ export async function getActionContext(): Promise<ActionContext> {
 		check_issues: core.getInput('check_issues'),
 		ignore_dependabot: core.getInput('ignore_dependabot'),
 		commit_status: core.getInput('commit_status'),
+		dry_run: core.getInput('dry_run'),
 		keywords: core
 			.getInput('keywords')
 			.trim()
@@ -33,13 +35,25 @@ export async function getActionContext(): Promise<ActionContext> {
 		throw new Error('env.GITHUB_TOKEN must not be empty');
 	}
 
-	const client = github.getOctokit(
-		process.env.GITHUB_TOKEN
-	) as unknown as GithubClient;
+	const dryRun = config.dry_run === 'on';
 
-	const readOnlyClient = github.getOctokit(
-		process.env.GITHUB_READ_TOKEN || process.env.GITHUB_TOKEN
-	) as unknown as GithubClient;
+	if (dryRun) {
+		core.info('Dry run: no changes will be made');
+	}
+
+	const client = installHooks(
+		github.getOctokit(
+			process.env.GITHUB_TOKEN
+		) as unknown as GithubClient,
+		{ dryRun }
+	);
+
+	const readOnlyClient = installHooks(
+		github.getOctokit(
+			process.env.GITHUB_READ_TOKEN || process.env.GITHUB_TOKEN
+		) as unknown as GithubClient,
+		{ dryRun }
+	);
 
 	const { issue, repo } = github.context;
 

@@ -224,6 +224,7 @@ exports.getActionContext = void 0;
 const core = __importStar(__nccwpck_require__(2186));
 const github = __importStar(__nccwpck_require__(5438));
 const github_1 = __nccwpck_require__(5928);
+const octokit_1 = __nccwpck_require__(3258);
 function getActionContext() {
     return __awaiter(this, void 0, void 0, function* () {
         core.startGroup('Context');
@@ -235,6 +236,7 @@ function getActionContext() {
             check_issues: core.getInput('check_issues'),
             ignore_dependabot: core.getInput('ignore_dependabot'),
             commit_status: core.getInput('commit_status'),
+            dry_run: core.getInput('dry_run'),
             keywords: core
                 .getInput('keywords')
                 .trim()
@@ -247,8 +249,12 @@ function getActionContext() {
         if (!process.env.GITHUB_TOKEN) {
             throw new Error('env.GITHUB_TOKEN must not be empty');
         }
-        const client = github.getOctokit(process.env.GITHUB_TOKEN);
-        const readOnlyClient = github.getOctokit(process.env.GITHUB_READ_TOKEN || process.env.GITHUB_TOKEN);
+        const dryRun = config.dry_run === 'on';
+        if (dryRun) {
+            core.info('Dry run: no changes will be made');
+        }
+        const client = (0, octokit_1.installHooks)(github.getOctokit(process.env.GITHUB_TOKEN), { dryRun });
+        const readOnlyClient = (0, octokit_1.installHooks)(github.getOctokit(process.env.GITHUB_READ_TOKEN || process.env.GITHUB_TOKEN), { dryRun });
         const { issue, repo } = github.context;
         const fetchOptions = {
             signature: config.commentSignature,
@@ -812,6 +818,128 @@ class IssueManager {
 }
 exports.IssueManager = IssueManager;
 //# sourceMappingURL=helpers.js.map
+
+/***/ }),
+
+/***/ 3258:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || function (mod) {
+    if (mod && mod.__esModule) return mod;
+    var result = {};
+    if (mod != null) for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
+    __setModuleDefault(result, mod);
+    return result;
+};
+var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
+    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
+    return new (P || (P = Promise))(function (resolve, reject) {
+        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
+        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
+        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
+        step((generator = generator.apply(thisArg, _arguments || [])).next());
+    });
+};
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.installHooks = exports.retryDelay = void 0;
+// Packages
+const core = __importStar(__nccwpck_require__(2186));
+// GitHub recommends waiting at least a second between requests that
+// create content, to avoid secondary rate limits.
+// https://docs.github.com/en/rest/using-the-rest-api/best-practices-for-using-the-rest-api
+const MIN_WRITE_INTERVAL = 1000;
+const MAX_RETRIES = 3;
+// Don't wait longer than this for a rate limit to reset
+const MAX_WAIT = 15 * 60 * 1000;
+const defaultSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+function isWrite(options) {
+    return options.method !== 'GET' && options.url !== '/graphql';
+}
+/**
+ * Returns how long to wait before retrying a request that failed
+ * because of a rate limit, or `undefined` if it shouldn't be retried.
+ */
+function retryDelay(error, attempt, now) {
+    var _a;
+    if ((error === null || error === void 0 ? void 0 : error.status) !== 403 && (error === null || error === void 0 ? void 0 : error.status) !== 429) {
+        return undefined;
+    }
+    const headers = ((_a = error.response) === null || _a === void 0 ? void 0 : _a.headers) || {};
+    if (headers['retry-after']) {
+        return Number(headers['retry-after']) * 1000;
+    }
+    if (headers['x-ratelimit-remaining'] === '0') {
+        const reset = Number(headers['x-ratelimit-reset']) * 1000;
+        return Math.max(reset - now, 0) + 1000;
+    }
+    if (/secondary rate limit/i.test(error.message || '')) {
+        return 60 * 1000 * Math.pow(2, attempt);
+    }
+    return undefined;
+}
+exports.retryDelay = retryDelay;
+/**
+ * Makes the client:
+ * - space out and retry write requests on rate limits
+ * - skip (and log) write requests in dry-run mode
+ */
+function installHooks(gh, options = {}) {
+    const sleep = options.sleep || defaultSleep;
+    const now = options.now || Date.now;
+    let lastWrite = 0;
+    gh.hook.wrap('request', (request, requestOptions) => __awaiter(this, void 0, void 0, function* () {
+        const write = isWrite(requestOptions);
+        if (write && options.dryRun) {
+            const { method, url, body } = gh.request.endpoint(requestOptions);
+            const details = body ? ` ${JSON.stringify(body)}` : '';
+            core.info(`[dry run] Skipped ${method} ${url}${details}`);
+            return { status: 200, url, headers: {}, data: {} };
+        }
+        for (let attempt = 0;; attempt++) {
+            if (write) {
+                const wait = lastWrite + MIN_WRITE_INTERVAL - now();
+                if (wait > 0) {
+                    yield sleep(wait);
+                }
+                lastWrite = now();
+            }
+            try {
+                return yield request(requestOptions);
+            }
+            catch (error) {
+                const delay = retryDelay(error, attempt, now());
+                if (delay === undefined ||
+                    attempt >= MAX_RETRIES ||
+                    delay > MAX_WAIT) {
+                    throw error;
+                }
+                core.warning(`Rate limited. Retrying in ${Math.ceil(delay / 1000)}s`);
+                yield sleep(delay);
+            }
+        }
+    }));
+    return gh;
+}
+exports.installHooks = installHooks;
+//# sourceMappingURL=octokit.js.map
 
 /***/ }),
 
