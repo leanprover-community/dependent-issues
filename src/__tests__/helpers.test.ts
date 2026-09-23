@@ -390,6 +390,46 @@ describe('IssueManager', () => {
 		});
 	});
 
+	describe('generateComment', () => {
+		const deps = [
+			{ owner: 'a', repo: 'b', number: 1, blocker: true },
+			{ owner: 'a', repo: 'b', number: 2, blocker: false },
+			{ owner: 'c', repo: 'd', number: 3, blocker: true },
+		];
+
+		const render = (commentBody: string) =>
+			new IssueManager(gh, repo, {
+				...config,
+				commentBody,
+			}).generateComment({ number: 42 } as any, deps);
+
+		it('renders all dependencies', () => {
+			expect(render('Deps:\n{{ dependencies }}')).toEqual(
+				'Deps:\n* a/b#1\n* ~~a/b#2~~\n* c/d#3'
+			);
+		});
+
+		it('renders blockers and resolved dependencies', () => {
+			expect(render('{{blockers}}|{{ resolved }}')).toEqual(
+				'* a/b#1\n* c/d#3|* a/b#2'
+			);
+		});
+
+		it('renders the number and counts', () => {
+			expect(
+				render(
+					'#{{ number }}: {{ blocker_count }} of {{ dependency_count }} open, {{ resolved_count }} resolved'
+				)
+			).toEqual('#42: 2 of 3 open, 1 resolved');
+		});
+
+		it('is case-insensitive and keeps unknown tokens', () => {
+			expect(render('{{ NUMBER }} {{ unknown }}')).toEqual(
+				'42 {{ unknown }}'
+			);
+		});
+	});
+
 	it('removes action comments', async () => {
 		await manager.removeActionComments({
 			number: 1,

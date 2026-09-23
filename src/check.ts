@@ -19,7 +19,7 @@ async function checkIssue(
 	manager: IssueManager,
 	resolver: DependencyResolver
 ) {
-	const { config, repo } = context;
+	const { repo } = context;
 
 	if (dependencies.length === 0) {
 		core.info('No dependencies found. Running clean-up');
@@ -68,7 +68,7 @@ async function checkIssue(
 
 	await manager.writeComment(
 		issue,
-		manager.generateComment(dependencies, dependencies, config),
+		manager.generateComment(issue, dependencies),
 		!isBlocked
 	);
 

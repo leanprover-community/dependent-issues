@@ -71,7 +71,7 @@ jobs:
           # "depends on, blocked by"
           keywords: depends on, blocked by
 
-          # (Optional) A custom comment body. It supports `{{ dependencies }}` token.
+          # (Optional) A custom comment body. See below for the supported tokens.
           comment: >
             This PR/issue depends on:
 
@@ -92,7 +92,14 @@ Here how it can look like in practice:
 - **commit_status** (Optional): Set a commit status (`pending` while blocked, `success` otherwise) on the head commit of PRs. Disable by setting the value to `off`. Default `on`.
 - **dry_run** (Optional): Log the changes that would be made (labels, comments, commit statuses) without making them. Enable by setting the value to `on`. Default `off`.
 - **keywords** (Optional): A comma-separated list of keywords. Default `depends on, blocked by`.
-- **comment** (Optional): A custom comment body. It supports `{{ dependencies }}` token.
+- **comment** (Optional): A custom comment body. It supports the following tokens:
+  - `{{ dependencies }}`: a list of all dependencies, with resolved ones struck through
+  - `{{ blockers }}`: a list of the unresolved dependencies
+  - `{{ resolved }}`: a list of the resolved dependencies
+  - `{{ dependency_count }}`, `{{ blocker_count }}`, `{{ resolved_count }}`: the number of dependencies of each kind
+  - `{{ number }}`: the number of the PR/issue itself
+
+  Changing the comment body updates the existing comments on all dependent PRs/issues on the next run. Consider previewing the change with `dry_run: on` first.
 
 ## Environment variables
 

@@ -199,25 +199,41 @@ export class IssueManager {
 			.trim();
 	}
 
-	public generateComment(
-		deps: Dependency[],
-		dependencies: Dependency[],
-		config: ActionContext['config']
-	) {
+	/**
+	 * Renders the comment body, replacing the supported `{{ token }}`s.
+	 * Unknown tokens are left as they are.
+	 */
+	public generateComment(issue: Issue, dependencies: Dependency[]) {
 		// e.g:
 		// * facebook/react#999
 		// * ~~facebook/react#1~~
-		const dependenciesList = deps
-			.map((dep) => {
-				const link = formatDependency(dep);
-				return '* ' + (dep.blocker ? link : `~~${link}~~`);
-			})
-			.join('\n');
+		const list = (deps: Dependency[], strikeResolved = false) =>
+			deps
+				.map((dep) => {
+					const link = formatDependency(dep);
+					return (
+						'* ' +
+						(strikeResolved && !dep.blocker ? `~~${link}~~` : link)
+					);
+				})
+				.join('\n');
 
-		//
-		return config.commentBody.replace(
-			/\{\{\s*dependencies\s*\}\}/gi,
-			dependenciesList
+		const blockers = dependencies.filter((dep) => dep.blocker);
+		const resolved = dependencies.filter((dep) => !dep.blocker);
+
+		const tokens: Record<string, string> = {
+			number: `${issue.number}`,
+			dependencies: list(dependencies, true),
+			blockers: list(blockers),
+			resolved: list(resolved),
+			dependency_count: `${dependencies.length}`,
+			blocker_count: `${blockers.length}`,
+			resolved_count: `${resolved.length}`,
+		};
+
+		return this.config.commentBody.replace(
+			/\{\{\s*(\w+)\s*\}\}/g,
+			(match, name: string) => tokens[name.toLowerCase()] ?? match
 		);
 	}
 

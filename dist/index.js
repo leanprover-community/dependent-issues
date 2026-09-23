@@ -109,7 +109,7 @@ const support_1 = __nccwpck_require__(8238);
 const helpers_1 = __nccwpck_require__(5008);
 function checkIssue(issue, dependencies, context, manager, resolver) {
     return __awaiter(this, void 0, void 0, function* () {
-        const { config, repo } = context;
+        const { repo } = context;
         if (dependencies.length === 0) {
             core.info('No dependencies found. Running clean-up');
             yield manager.removeLabel(issue);
@@ -136,7 +136,7 @@ function checkIssue(issue, dependencies, context, manager, resolver) {
         isBlocked
             ? yield manager.addLabel(issue)
             : yield manager.removeLabel(issue);
-        yield manager.writeComment(issue, manager.generateComment(dependencies, dependencies, config), !isBlocked);
+        yield manager.writeComment(issue, manager.generateComment(issue, dependencies), !isBlocked);
         yield manager.updateCommitStatus(issue, dependencies);
     });
 }
@@ -735,18 +735,33 @@ class IssueManager {
             .slice(0, -1 * this.config.commentSignature.length)
             .trim();
     }
-    generateComment(deps, dependencies, config) {
+    /**
+     * Renders the comment body, replacing the supported `{{ token }}`s.
+     * Unknown tokens are left as they are.
+     */
+    generateComment(issue, dependencies) {
         // e.g:
         // * facebook/react#999
         // * ~~facebook/react#1~~
-        const dependenciesList = deps
+        const list = (deps, strikeResolved = false) => deps
             .map((dep) => {
             const link = formatDependency(dep);
-            return '* ' + (dep.blocker ? link : `~~${link}~~`);
+            return ('* ' +
+                (strikeResolved && !dep.blocker ? `~~${link}~~` : link));
         })
             .join('\n');
-        //
-        return config.commentBody.replace(/\{\{\s*dependencies\s*\}\}/gi, dependenciesList);
+        const blockers = dependencies.filter((dep) => dep.blocker);
+        const resolved = dependencies.filter((dep) => !dep.blocker);
+        const tokens = {
+            number: `${issue.number}`,
+            dependencies: list(dependencies, true),
+            blockers: list(blockers),
+            resolved: list(resolved),
+            dependency_count: `${dependencies.length}`,
+            blocker_count: `${blockers.length}`,
+            resolved_count: `${resolved.length}`,
+        };
+        return this.config.commentBody.replace(/\{\{\s*(\w+)\s*\}\}/g, (match, name) => { var _a; return (_a = tokens[name.toLowerCase()]) !== null && _a !== void 0 ? _a : match; });
     }
     /**
      * Writes (or updates) the action comment. `issue.comments` must

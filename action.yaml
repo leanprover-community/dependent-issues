@@ -39,7 +39,7 @@ inputs:
 
   comment:
     required: false
-    description: A custom comment body. It supports `{{ dependencies }}` token.
+    description: A custom comment body. See the README for the supported `{{ token }}`s.
     default: >
       This PR/issue depends on:
 
