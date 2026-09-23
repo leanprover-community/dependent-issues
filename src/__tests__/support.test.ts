@@ -5,9 +5,7 @@ describe('isSupported', () => {
 		const config: any = {
 			ignore_dependabot: 'off',
 		};
-		const issue: any = {
-			user: null,
-		};
+		const issue: any = {};
 
 		expect(isSupported(config, issue)).toEqual(true);
 	});
@@ -17,9 +15,7 @@ describe('isSupported', () => {
 			ignore_dependabot: 'on',
 		};
 		const issue: any = {
-			user: {
-				login: 'dependabot[bot]',
-			},
+			author: 'dependabot',
 		};
 
 		expect(isSupported(config, issue)).toEqual(false);
@@ -30,9 +26,7 @@ describe('isSupported', () => {
 			ignore_dependabot: 'off',
 		};
 		const issue: any = {
-			user: {
-				login: 'dependabot[bot]',
-			},
+			author: 'dependabot',
 		};
 
 		expect(isSupported(config, issue)).toEqual(true);

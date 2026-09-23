@@ -4,6 +4,7 @@ import * as github from '@actions/github';
 
 // Ours
 import { ActionContext, GithubClient, Issue } from './types';
+import { fetchOpenIssue, fetchOpenIssues } from './github';
 
 export async function getActionContext(): Promise<ActionContext> {
 	core.startGroup('Context');
@@ -16,6 +17,7 @@ export async function getActionContext(): Promise<ActionContext> {
 		label: core.getInput('label'),
 		check_issues: core.getInput('check_issues'),
 		ignore_dependabot: core.getInput('ignore_dependabot'),
+		commit_status: core.getInput('commit_status'),
 		keywords: core
 			.getInput('keywords')
 			.trim()
@@ -41,6 +43,12 @@ export async function getActionContext(): Promise<ActionContext> {
 
 	const { issue, repo } = github.context;
 
+	const fetchOptions = {
+		signature: config.commentSignature,
+		statusContext:
+			config.commit_status === 'on' ? config.actionName : undefined,
+	};
+
 	let issues: Issue[] = [];
 
 	// If we are running in an issue context then only run checks
@@ -48,40 +56,28 @@ export async function getActionContext(): Promise<ActionContext> {
 	// then the issue could be a dependency of another PR/issue.
 	if (issue?.number) {
 		core.info(`Payload issue: #${issue?.number}`);
-		const remoteIssue = (
-			await client.rest.issues.get({
-				...repo,
-				issue_number: issue.number,
-			})
-		).data;
+		const remoteIssue = await fetchOpenIssue(
+			client,
+			repo,
+			issue.number,
+			fetchOptions
+		);
 
 		// Ignore closed PR/issues
-		if (remoteIssue.state === 'open') {
+		if (remoteIssue) {
 			issues = [remoteIssue];
 		}
 	}
 
-	// Otherwise, check all open issues.
-	// If a label was provided in the config, check all open issues
-	// that have the label on them.
+	// Otherwise, check all open PRs (and issues, if enabled).
 	if (issues.length === 0) {
 		core.info(`Payload issue: None or closed`);
-		const options = {
-			...repo,
-			state: 'open' as 'open',
-			per_page: 100,
-		};
-
-		let queryParams = config.label
-			? { ...options, labels: config.label }
-			: options;
-
-		const method: any =
-			config.check_issues === 'on'
-				? client.rest.issues.listForRepo
-				: client.rest.pulls.list;
-
-		issues = (await client.paginate(method, queryParams)) as Issue[];
+		issues = await fetchOpenIssues(
+			client,
+			repo,
+			config.check_issues === 'on',
+			fetchOptions
+		);
 		core.info(`No. of open issues: ${issues.length}`);
 	}
 

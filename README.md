@@ -57,6 +57,10 @@ jobs:
           # Enable by setting the value to "on". Default "off"
           ignore_dependabot: off
 
+          # (Optional) Set a commit status on PRs.
+          # Disable by setting the value to "off". Default "on"
+          commit_status: on
+
           # (Optional) A comma-separated list of keywords. Default
           # "depends on, blocked by"
           keywords: depends on, blocked by
@@ -79,12 +83,22 @@ Here how it can look like in practice:
 - **label** (Optional): The label to use to mark dependent issues. Default `dependent`.
 - **check_issues** (Optional): Enable checking for dependencies in issues. Enable by setting the value to `on`. Default `off`.
 - **ignore_dependabot** (Optional): Ignore dependabot PRs. Enable by setting the value to `on`. Default `off`. Use this if you run the action on `pull_request` rather than `pull_request_target`.
+- **commit_status** (Optional): Set a commit status (`pending` while blocked, `success` otherwise) on the head commit of PRs. Disable by setting the value to `off`. Default `on`.
 - **keywords** (Optional): A comma-separated list of keywords. Default `depends on, blocked by`.
 - **comment** (Optional): A custom comment body. It supports `{{ dependencies }}` token.
 
 ## Environment variables
 
 - **GITHUB_TOKEN** (Required): The token to use to make API calls to GitHub.
+- **GITHUB_READ_TOKEN** (Optional): The token to use to look up dependencies, e.g. in private repositories. Defaults to `GITHUB_TOKEN`.
+
+## API usage
+
+The action reads the state of all open PRs (and issues, if `check_issues` is on), including their labels, comments and commit statuses, through a small number of paginated GraphQL requests (roughly one per 50 PRs/issues). The state of dependencies outside that set, including cross-repository ones, is looked up in batches of up to 100 per request. REST API calls are only made when something needs to change: a label, a comment or a commit status.
+
+This keeps the action usable on repositories with thousands of open PRs, even when run on a frequent schedule.
+
+Dependencies that can't be found (e.g. a typo, or a private repository the token can't access) are treated as blockers and reported as warnings.
 
 ## FAQ
 

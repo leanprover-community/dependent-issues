@@ -22,6 +22,11 @@ inputs:
     description: Ignore Dependabot PRs.
     default: off
 
+  commit_status:
+    required: false
+    description: Set a commit status on the head commit of PRs. Disable by setting the value to "off".
+    default: on
+
   keywords:
     required: false
     description: A comma-separated list of keywords
@@ -38,5 +43,5 @@ inputs:
       By **[Dependent Issues](https://github.com/z0al/dependent-issues)** (🤖). Happy coding!
 
 runs:
-  using: node16
+  using: node24
   main: ./index.js

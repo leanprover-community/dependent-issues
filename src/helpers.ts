@@ -10,8 +10,12 @@ import {
 	Repository,
 	GithubClient,
 	ActionContext,
-	Comment,
 } from './types';
+import {
+	DependencyState,
+	dependencyKey,
+	fetchDependencyStates,
+} from './github';
 
 export function formatDependency(dep: Dependency, repo?: Repository) {
 	const depRepo = { owner: dep.owner, repo: dep.repo };
@@ -104,57 +108,44 @@ export class DependencyExtractor {
 }
 
 export class DependencyResolver {
-	private cache: Map<string, { issue: Issue; repo: Repository }>;
+	private states = new Map<string, DependencyState>();
 
 	constructor(
 		private gh: GithubClient,
 		issues: Issue[],
 		repo: Repository
 	) {
-		this.cache = new Map();
-
-		// Populate the cache with the known issues
+		// The known issues are all open
 		issues.forEach((issue) => {
-			this.cache.set(
-				this.cacheKey({
-					...repo,
-					number: issue.number,
-				}),
-				{ issue, repo }
+			this.states.set(
+				dependencyKey({ ...repo, number: issue.number }),
+				'open'
 			);
 		});
 	}
 
-	private cacheKey(dep: Dependency) {
-		return `${dep.owner}/${dep.repo}#${dep.number}`;
-	}
+	/**
+	 * Fetches the state of all the given dependencies that aren't
+	 * known yet, in as few requests as possible.
+	 */
+	async prefetch(deps: Dependency[]) {
+		const unknown = uniqBy(
+			deps.filter((dep) => !this.states.has(dependencyKey(dep))),
+			dependencyKey
+		);
 
-	async get(dep: Dependency) {
-		const key = this.cacheKey(dep);
-		const cachedIssue = this.cache.get(key)?.issue;
-
-		if (cachedIssue) {
-			return cachedIssue;
+		if (unknown.length === 0) {
+			return;
 		}
 
-		// Fetch from GitHub
-		const remoteIssue = (
-			await this.gh.rest.issues.get({
-				owner: dep.owner,
-				repo: dep.repo,
-				issue_number: dep.number,
-			})
-		).data;
+		const states = await fetchDependencyStates(this.gh, unknown);
+		states.forEach((state, key) => this.states.set(key, state));
+	}
 
-		this.cache.set(key, {
-			issue: remoteIssue,
-			repo: {
-				owner: dep.owner,
-				repo: dep.repo,
-			},
-		});
+	async get(dep: Dependency): Promise<DependencyState> {
+		await this.prefetch([dep]);
 
-		return remoteIssue;
+		return this.states.get(dependencyKey(dep)) || 'unknown';
 	}
 }
 
@@ -166,17 +157,11 @@ export class IssueManager {
 	) {}
 
 	hasLabel(issue: Issue) {
-		const labels = issue.labels.map((label) =>
-			typeof label === 'string' ? label : label.name
-		);
-
-		return labels.includes(this.config.label);
+		return issue.labels.includes(this.config.label);
 	}
 
 	async addLabel(issue: Issue) {
-		const shouldAddLabel = !this.hasLabel(issue);
-
-		if (shouldAddLabel) {
+		if (!this.hasLabel(issue)) {
 			await this.gh.rest.issues.addLabels({
 				...this.repo,
 				issue_number: issue.number,
@@ -186,9 +171,7 @@ export class IssueManager {
 	}
 
 	async removeLabel(issue: Issue) {
-		const shouldRemoveLabel = this.hasLabel(issue);
-
-		if (shouldRemoveLabel) {
+		if (this.hasLabel(issue)) {
 			await this.gh.rest.issues.removeLabel({
 				...this.repo,
 				issue_number: issue.number,
@@ -203,14 +186,6 @@ export class IssueManager {
 	 */
 	private sign(text: string) {
 		return text.trim() + '\n' + this.config.commentSignature;
-	}
-
-	private isSigned(text?: string) {
-		if (!text) {
-			return false;
-		}
-
-		return text.trim().endsWith(this.config.commentSignature);
 	}
 
 	private originalText(signed?: string) {
@@ -246,17 +221,13 @@ export class IssueManager {
 		);
 	}
 
+	/**
+	 * Writes (or updates) the action comment. `issue.comments` must
+	 * contain the existing action comments.
+	 */
 	async writeComment(issue: Issue, text: string, create = false) {
 		const signedText = this.sign(text);
-
-		const issueComments: Comment[] = await this.gh.paginate(
-			this.gh.rest.issues.listComments as any,
-			{ ...this.repo, issue_number: issue.number, per_page: 100 }
-		);
-
-		const currentComment = issueComments.find((comment) =>
-			this.isSigned(comment.body)
-		);
+		const currentComment = issue.comments[0];
 
 		// Exit early if the content is the same
 		if (currentComment) {
@@ -291,26 +262,25 @@ export class IssueManager {
 	}
 
 	async removeActionComments(issue: Issue) {
-		const issueComments: Comment[] = await this.gh.paginate(
-			this.gh.rest.issues.listComments as any,
-			{ ...this.repo, issue_number: issue.number, per_page: 100 }
-		);
-		const existingComments = issueComments.filter((comment) =>
-			this.isSigned(comment.body)
-		);
-
-		await Promise.all(
-			existingComments.map((comment: any) =>
-				this.gh.rest.issues.deleteComment({
-					...this.repo,
-					comment_id: comment.id,
-				})
-			)
-		);
+		for (const comment of issue.comments) {
+			await this.gh.rest.issues.deleteComment({
+				...this.repo,
+				comment_id: comment.id,
+			});
+		}
 	}
 
+	/**
+	 * Sets the commit status of a PR's head commit, unless it already
+	 * has the right status. Does nothing if commit statuses are
+	 * disabled.
+	 */
 	async updateCommitStatus(issue: Issue, dependencies: Dependency[]) {
-		if (!issue.pull_request) {
+		if (
+			!issue.isPullRequest ||
+			!issue.headSha ||
+			this.config.commit_status !== 'on'
+		) {
 			return;
 		}
 
@@ -330,20 +300,21 @@ export class IssueManager {
 					blockers.length - 1
 			  } more issues`;
 
-		// Get the PR Head SHA
-		const pull = (
-			await this.gh.rest.pulls.get({
-				...this.repo,
-				pull_number: issue.number,
-			})
-		).data;
+		const state = isBlocked ? 'pending' : 'success';
 
-		return this.gh.rest.repos.createCommitStatus({
+		if (
+			issue.commitStatus?.state.toLowerCase() === state &&
+			issue.commitStatus?.description === description
+		) {
+			return;
+		}
+
+		await this.gh.rest.repos.createCommitStatus({
 			...this.repo,
 			description,
-			sha: pull.head.sha,
+			sha: issue.headSha,
 			context: this.config.actionName,
-			state: isBlocked ? 'pending' : 'success',
+			state,
 		});
 	}
 }

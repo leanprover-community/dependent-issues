@@ -8,7 +8,8 @@ import { Issue } from './types';
  * https://bit.ly/2NDzjUM
  */
 function isDependabotPR(issue: Issue) {
-	return issue.user?.login === 'dependabot[bot]';
+	// GraphQL reports bot logins without the `[bot]` suffix
+	return ['dependabot', 'dependabot[bot]'].includes(issue.author || '');
 }
 
 export function isSupported(

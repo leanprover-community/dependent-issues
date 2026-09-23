@@ -123,7 +123,7 @@ test('DependencyExtractor', () => {
 
 describe('DependencyResolver', () => {
 	let gh: GithubClient;
-	let issuesGet: jest.Mock<any, any>;
+	let graphql: jest.Mock<any, any>;
 	let resolver: DependencyResolver;
 
 	const repo = {
@@ -132,67 +132,67 @@ describe('DependencyResolver', () => {
 	};
 
 	const contextIssues = [1, 2, 3].map((number) => ({
-		title: `Issue ${number}`,
 		number,
 	})) as Issue[];
 
 	beforeEach(() => {
-		issuesGet = jest.fn();
-
-		gh = {
-			rest: {
-				issues: {
-					get: issuesGet as any,
-				},
-			},
-		} as GithubClient;
-
+		graphql = jest.fn();
+		gh = { graphql: graphql as any } as GithubClient;
 		resolver = new DependencyResolver(gh, contextIssues, repo);
 	});
 
-	it('resolves context issues', async () => {
-		expect(
-			await resolver.get({
-				...repo,
-				number: 1,
-			})
-		).toEqual({ number: 1, title: 'Issue 1' });
+	it('resolves context issues as open', async () => {
+		expect(await resolver.get({ ...repo, number: 1 })).toEqual('open');
+		expect(graphql).not.toHaveBeenCalled();
 	});
 
-	it('fetches unknown issues', async () => {
-		const issue = { number: 4, title: 'Issue 4' };
-		issuesGet.mockResolvedValue({ data: issue });
-
-		const dependency = {
-			...repo,
-			number: 4,
-		};
-
-		const resolvedIssue = await resolver.get(dependency);
-
-		expect(issuesGet).toHaveBeenCalledWith({
-			...repo,
-			issue_number: 4,
+	it('fetches unknown issues in a single request', async () => {
+		graphql.mockResolvedValue({
+			r0: { i4: { state: 'CLOSED' }, i5: { state: 'OPEN' } },
+			r1: { i6: { state: 'MERGED' } },
 		});
 
-		expect(resolvedIssue).toEqual(issue);
+		await resolver.prefetch([
+			{ ...repo, number: 1 },
+			{ ...repo, number: 4 },
+			{ ...repo, number: 5 },
+			{ ...repo, number: 4 },
+			{ owner: 'other', repo: 'repo', number: 6 },
+		]);
+
+		expect(graphql).toHaveBeenCalledTimes(1);
+		expect(await resolver.get({ ...repo, number: 4 })).toEqual(
+			'closed'
+		);
+		expect(await resolver.get({ ...repo, number: 5 })).toEqual('open');
+		expect(
+			await resolver.get({ owner: 'other', repo: 'repo', number: 6 })
+		).toEqual('closed');
+		expect(graphql).toHaveBeenCalledTimes(1);
 	});
 
-	it('caches fetched issues', async () => {
-		const issue = { number: 4, title: 'Issue 4' };
-		issuesGet.mockResolvedValue({ data: issue });
+	it('reports missing issues as unknown', async () => {
+		// GraphQL errors come with partial data
+		graphql.mockRejectedValue(
+			Object.assign(new Error('Not found'), {
+				errors: [{ type: 'NOT_FOUND' }],
+				data: { r0: { i4: null } },
+			})
+		);
 
-		const dependency = {
-			...repo,
-			number: 4,
-		};
+		expect(await resolver.get({ ...repo, number: 4 })).toEqual(
+			'unknown'
+		);
+	});
 
-		await resolver.get(dependency);
-		await resolver.get(dependency);
-		const resolvedIssue = await resolver.get(dependency);
+	it('rethrows other errors', async () => {
+		graphql.mockRejectedValue(
+			Object.assign(new Error('Bad credentials'), { status: 401 })
+		);
 
-		expect(resolvedIssue).toEqual(issue);
-		expect(issuesGet).toHaveBeenCalledTimes(1);
+		await expect(resolver.get({ ...repo, number: 4 })).rejects.toThrow(
+			'Bad credentials'
+		);
 	});
 });
 
@@ -209,132 +209,134 @@ describe('IssueManager', () => {
 		actionName: 'my-action',
 		label: 'my-label',
 		commentSignature: '<action-signature>',
+		commit_status: 'on',
 	} as ActionContext['config'];
 
-	let listComments: jest.Mock<any, any>;
-
 	beforeEach(() => {
-		listComments = jest.fn();
-
 		gh = {
-			paginate: jest
-				.fn()
-				.mockImplementation((_, options) =>
-					listComments(options)
-				) as any,
 			rest: {
 				issues: {
 					addLabels: jest.fn() as any,
 					removeLabel: jest.fn() as any,
-					listComments: listComments as any,
 					deleteComment: jest.fn() as any,
 					updateComment: jest.fn() as any,
 					createComment: jest.fn() as any,
-				},
-				pulls: {
-					get: jest.fn() as any,
 				},
 				repos: {
 					createCommitStatus: jest.fn() as any,
 				},
 			},
-		} as GithubClient;
+		} as unknown as GithubClient;
 
 		manager = new IssueManager(gh, repo, config);
 	});
 
-	describe('updateCommitStatus', () => {
-		const pr = {
-			head: {
-				sha: '<commit-sha>',
-			},
-		};
+	describe('labels', () => {
+		it('only adds missing labels', async () => {
+			await manager.addLabel({
+				number: 1,
+				labels: ['my-label'],
+			} as any);
+			expect(gh.rest.issues.addLabels).not.toHaveBeenCalled();
 
-		beforeEach(() => {
-			((gh.rest.pulls.get as unknown) as jest.Mock<
-				any,
-				any
-			>).mockResolvedValue({ data: pr });
+			await manager.addLabel({ number: 1, labels: ['other'] } as any);
+			expect(gh.rest.issues.addLabels).toHaveBeenCalledWith({
+				...repo,
+				issue_number: 1,
+				labels: ['my-label'],
+			});
 		});
 
+		it('only removes existing labels', async () => {
+			await manager.removeLabel({ number: 1, labels: [] } as any);
+			expect(gh.rest.issues.removeLabel).not.toHaveBeenCalled();
+
+			await manager.removeLabel({
+				number: 1,
+				labels: ['my-label'],
+			} as any);
+			expect(gh.rest.issues.removeLabel).toHaveBeenCalledWith({
+				...repo,
+				issue_number: 1,
+				name: 'my-label',
+			});
+		});
+	});
+
+	describe('updateCommitStatus', () => {
+		const pr = (commitStatus: any = null) =>
+			({
+				number: 141,
+				isPullRequest: true,
+				headSha: '<commit-sha>',
+				commitStatus,
+			} as any);
+
 		it('ignores non-PRs', async () => {
-			const issue = {} as any;
-			await manager.updateCommitStatus(issue, []);
-			expect(gh.rest.pulls.get).not.toHaveBeenCalled();
+			await manager.updateCommitStatus({ number: 141 } as any, []);
+			expect(gh.rest.repos.createCommitStatus).not.toHaveBeenCalled();
+		});
+
+		it('does nothing when disabled', async () => {
+			manager = new IssueManager(gh, repo, {
+				...config,
+				commit_status: 'off',
+			});
+			await manager.updateCommitStatus(pr(), []);
 			expect(gh.rest.repos.createCommitStatus).not.toHaveBeenCalled();
 		});
 
 		it('sets the correct status on success', async () => {
-			const issue = { number: 141, pull_request: {} } as any;
-
-			await manager.updateCommitStatus(issue, []);
-
-			expect(gh.rest.pulls.get).toHaveBeenCalledWith({
-				...repo,
-				pull_number: issue.number,
-			});
+			await manager.updateCommitStatus(pr(), []);
 
 			expect(gh.rest.repos.createCommitStatus).toHaveBeenCalledWith({
 				...repo,
 				description: 'No dependencies',
 				state: 'success',
-				sha: pr.head.sha,
+				sha: '<commit-sha>',
 				context: config.actionName,
 			});
 		});
 
 		it('sets the correct status on pending', async () => {
-			const issue = { number: 141, pull_request: {} } as any;
-
-			await manager.updateCommitStatus(issue, [
+			await manager.updateCommitStatus(pr(), [
 				{ repo: 'repo', owner: 'owner', number: 999, blocker: true },
 				{ blocker: true } as any,
 				{ blocker: true } as any,
 			]);
 
-			expect(gh.rest.pulls.get).toHaveBeenCalledWith({
-				...repo,
-				pull_number: issue.number,
-			});
-
 			expect(gh.rest.repos.createCommitStatus).toHaveBeenCalledWith({
 				...repo,
 				description: 'Blocked by owner/repo#999 and 2 more issues',
 				state: 'pending',
-				sha: pr.head.sha,
+				sha: '<commit-sha>',
 				context: config.actionName,
 			});
+		});
+
+		it('skips unchanged statuses', async () => {
+			await manager.updateCommitStatus(
+				pr({ state: 'SUCCESS', description: 'No dependencies' }),
+				[]
+			);
+			expect(gh.rest.repos.createCommitStatus).not.toHaveBeenCalled();
 		});
 	});
 
 	describe('writeComment', () => {
-		const comments = [
-			{ id: 1, body: 'Random text' },
-			{
-				id: 2,
-				body: `  Existing text\t\n${config.commentSignature}\n\n `,
-			},
-			{ id: 3, body: 'Random text' },
-			{ id: 4, body: 'Random text' },
-		];
-
-		beforeEach(() => {
-			listComments.mockResolvedValue(comments);
-		});
+		const issue = {
+			number: 141,
+			comments: [
+				{
+					id: 2,
+					body: `  Existing text\t\n${config.commentSignature}\n\n `,
+				},
+			],
+		} as any;
 
 		it('updates existing comment', async () => {
 			const text = ' This is the updated text\n';
-			const issue = { number: 141 } as any;
 			await manager.writeComment(issue, text);
-
-			expect(gh.paginate).toHaveBeenCalled();
-
-			expect(gh.rest.issues.listComments).toHaveBeenCalledWith(
-				expect.objectContaining({
-					...repo,
-					issue_number: issue.number,
-				})
-			);
 
 			expect(gh.rest.issues.updateComment).toHaveBeenCalledWith({
 				...repo,
@@ -348,16 +350,7 @@ describe('IssueManager', () => {
 
 		it('creates a new comment if required', async () => {
 			const text = ' This is the updated text\n';
-			const issue = { number: 141 } as any;
 			await manager.writeComment(issue, text, true);
-
-			expect(gh.paginate).toHaveBeenCalled();
-
-			expect(gh.rest.issues.listComments).toHaveBeenCalledWith({
-				...repo,
-				issue_number: issue.number,
-				per_page: 100,
-			});
 
 			expect(gh.rest.issues.deleteComment).toHaveBeenCalledWith({
 				...repo,
@@ -373,23 +366,36 @@ describe('IssueManager', () => {
 			expect(gh.rest.issues.updateComment).not.toHaveBeenCalled();
 		});
 
+		it('creates a comment if there is none', async () => {
+			await manager.writeComment(
+				{ number: 1, comments: [] } as any,
+				'x'
+			);
+
+			expect(gh.rest.issues.createComment).toHaveBeenCalledWith({
+				...repo,
+				issue_number: 1,
+				body: 'x\n' + config.commentSignature,
+			});
+		});
+
 		it('exits early if the text is the same', async () => {
 			const text = 'Existing text';
-			const issue = { number: 141 } as any;
 			await manager.writeComment(issue, text);
 			await manager.writeComment(issue, text, true);
-
-			expect(gh.paginate).toHaveBeenCalled();
-			expect(gh.rest.issues.listComments).toHaveBeenCalledWith(
-				expect.objectContaining({
-					...repo,
-					issue_number: issue.number,
-				})
-			);
 
 			expect(gh.rest.issues.updateComment).not.toHaveBeenCalled();
 			expect(gh.rest.issues.deleteComment).not.toHaveBeenCalled();
 			expect(gh.rest.issues.createComment).not.toHaveBeenCalled();
 		});
+	});
+
+	it('removes action comments', async () => {
+		await manager.removeActionComments({
+			number: 1,
+			comments: [{ id: 5 }, { id: 6 }],
+		} as any);
+
+		expect(gh.rest.issues.deleteComment).toHaveBeenCalledTimes(2);
 	});
 });
