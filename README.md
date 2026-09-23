@@ -2,6 +2,8 @@
 
 > A GitHub Action for marking issues as dependent on another
 
+This is a fork of the archived [z0al/dependent-issues](https://github.com/z0al/dependent-issues), adapted for use in [leanprover-community](https://github.com/leanprover-community) repositories. It is not intended for general use.
+
 It works with PRs and issues and supports cross-repository dependencies.
 
 ## Usage
@@ -38,7 +40,7 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - uses: z0al/dependent-issues@v1
+      - uses: leanprover-community/dependent-issues@<commit-sha>
         env:
           # (Required) The token to use to make API calls to GitHub.
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -60,6 +62,10 @@ jobs:
           # (Optional) Set a commit status on PRs.
           # Disable by setting the value to "off". Default "on"
           commit_status: on
+
+          # (Optional) Log the changes that would be made without
+          # making them. Enable by setting the value to "on". Default "off"
+          dry_run: off
 
           # (Optional) A comma-separated list of keywords. Default
           # "depends on, blocked by"
@@ -84,6 +90,7 @@ Here how it can look like in practice:
 - **check_issues** (Optional): Enable checking for dependencies in issues. Enable by setting the value to `on`. Default `off`.
 - **ignore_dependabot** (Optional): Ignore dependabot PRs. Enable by setting the value to `on`. Default `off`. Use this if you run the action on `pull_request` rather than `pull_request_target`.
 - **commit_status** (Optional): Set a commit status (`pending` while blocked, `success` otherwise) on the head commit of PRs. Disable by setting the value to `off`. Default `on`.
+- **dry_run** (Optional): Log the changes that would be made (labels, comments, commit statuses) without making them. Enable by setting the value to `on`. Default `off`.
 - **keywords** (Optional): A comma-separated list of keywords. Default `depends on, blocked by`.
 - **comment** (Optional): A custom comment body. It supports `{{ dependencies }}` token.
 
@@ -94,7 +101,7 @@ Here how it can look like in practice:
 
 ## API usage
 
-The action reads the state of all open PRs (and issues, if `check_issues` is on), including their labels, comments and commit statuses, through a small number of paginated GraphQL requests (roughly one per 50 PRs/issues). The state of dependencies outside that set, including cross-repository ones, is looked up in batches of up to 100 per request. REST API calls are only made when something needs to change: a label, a comment or a commit status.
+The action reads the state of all open PRs (and issues, if `check_issues` is on), including their labels, comments and commit statuses, through a small number of paginated GraphQL requests (roughly one per 50 PRs/issues). The state of dependencies outside that set, including cross-repository ones, is looked up in batches of up to 100 per request. REST API calls are only made when something needs to change: a label, a comment or a commit status. These are spaced at least a second apart, and retried when GitHub reports a rate limit.
 
 This keeps the action usable on repositories with thousands of open PRs, even when run on a frequent schedule.
 
