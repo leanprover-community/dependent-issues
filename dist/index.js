@@ -624,6 +624,10 @@ class DependencyExtractor {
         this.repo = repo;
         this.issueRegex = (0, issue_regex_1.default)();
         this.urlRegex = /https?:\/\/github\.com\/\w[\w-.]+\/\w[\w-.]+\/(?:issues|pull)\/[1-9]\d*\b/;
+        // The parts of a reference the regex matched: a link, or
+        // 'owner/repo#number' or '#number' (without owner and repo)
+        this.linkParts = /^https?:\/\/github\.com\/([^/]+)\/([^/]+)\/(?:issues|pull)\/(\d+)$/i;
+        this.refParts = /^(?:([^/]+)\/([^/#]+))?#(\d+)$/;
         this.keywordRegex = new RegExp(keywords.map((kw) => kw.trim().replace(/\s+/g, '\\s+')).join('|'), 'i');
         this.regex = this.buildRegex();
     }
@@ -637,36 +641,30 @@ class DependencyExtractor {
     }
     match(text) {
         const references = text.match(this.regex) || [];
-        return references.map((ref) => {
-            // Get rid of keywords now
-            ref = ref.replace(this.keywordRegex, '').trim();
-            // Remove full URL if found. Should return either '#number' or
-            // 'owner/repo#number' format
-            return ref
-                .replace(/https?:\/\/github\.com\//i, '')
-                .replace(/\/(issues|pull)\//i, '#');
-        });
+        // A reference has no whitespace, so it is what follows the last
+        // whitespace in the match. Removing the keyword instead can leave
+        // part of it behind, as ':' is with 'depends on, depends on:'.
+        return references.map((ref) => ref.split(/\s/).pop());
     }
     fromIssue(issue) {
         const dependencies = [];
-        for (const issueLink of this.match(issue.body || '')) {
-            // Can be '#number' or 'owner/repo#number'
+        for (const ref of this.match(issue.body || '')) {
+            const [, owner, repo, number] = (this.linkParts.exec(ref) ||
+                this.refParts.exec(ref));
             // 1) #number
-            if (issueLink.startsWith('#')) {
-                const issueNumber = Number(issueLink.slice(1));
+            if (!owner) {
+                const issueNumber = Number(number);
                 // Prevent self-referencing
                 if (issueNumber !== issue.number) {
                     dependencies.push(Object.assign(Object.assign({}, this.repo), { number: issueNumber }));
                 }
                 continue;
             }
-            // 2) owner/repo#number
-            const [owner, rest] = issueLink.split('/');
-            const [repoName, issueNumber] = rest.split('#');
+            // 2) owner/repo#number, or a link
             dependencies.push({
                 owner,
-                repo: repoName,
-                number: Number(issueNumber),
+                repo,
+                number: Number(number),
             });
         }
         return this.deduplicate(dependencies);
