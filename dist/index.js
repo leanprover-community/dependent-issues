@@ -623,7 +623,7 @@ class DependencyExtractor {
     constructor(repo, keywords) {
         this.repo = repo;
         this.issueRegex = (0, issue_regex_1.default)();
-        this.urlRegex = /https?:\/\/github\.com\/(?:\w[\w-.]+\/\w[\w-.]+|\B)\/(?:issues|pull)\/[1-9]\d*\b/;
+        this.urlRegex = /https?:\/\/github\.com\/\w[\w-.]+\/\w[\w-.]+\/(?:issues|pull)\/[1-9]\d*\b/;
         this.keywordRegex = new RegExp(keywords.map((kw) => kw.trim().replace(/\s+/g, '\\s+')).join('|'), 'i');
         this.regex = this.buildRegex();
     }
