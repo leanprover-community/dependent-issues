@@ -31,7 +31,7 @@ export class DependencyExtractor {
 	private regex: RegExp;
 	private issueRegex = IssueRegex();
 	private urlRegex =
-		/https?:\/\/github\.com\/(?:\w[\w-.]+\/\w[\w-.]+|\B)\/(?:issues|pull)\/[1-9]\d*\b/;
+		/https?:\/\/github\.com\/\w[\w-.]+\/\w[\w-.]+\/(?:issues|pull)\/[1-9]\d*\b/;
 	private keywordRegex: RegExp;
 
 	constructor(private repo: Repository, keywords: string[]) {

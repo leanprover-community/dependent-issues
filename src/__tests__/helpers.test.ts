@@ -50,6 +50,7 @@ test('DependencyExtractor', () => {
 	- Depends on this/is/not/repo#123
 	- Depends on #123hashtag
 	- Depends on https://github.com/another/repo/pulls/142
+	- Depends on https://github.com//issues/142
 	`;
 
 	const issue = { body } as Issue;
