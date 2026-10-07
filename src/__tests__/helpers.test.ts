@@ -33,6 +33,8 @@ test('DependencyExtractor', () => {
 		- Depends on https://github.com/another/repo/issues/141
 		- Depends on http://github.com/another/repo/issues/404
 		- Depends on https://github.com/another/repo/pull/142
+		- Depends on https://github.com/another/issues/issues/143
+		- Depends on https://github.com/another/pull/pull/144
 	- Crazy formatting:
 		- Depends on ano-ther.999/re_po#123
 	- In brackets:
@@ -90,6 +92,18 @@ test('DependencyExtractor', () => {
 			repo: 'repo',
 			number: 142,
 		},
+		// Depends on https://github.com/another/issues/issues/143
+		{
+			owner: 'another',
+			repo: 'issues',
+			number: 143,
+		},
+		// Depends on https://github.com/another/pull/pull/144
+		{
+			owner: 'another',
+			repo: 'pull',
+			number: 144,
+		},
 		// Depends on ano-ther.999/re_po#123
 		{
 			owner: 'ano-ther.999',
@@ -120,6 +134,28 @@ test('DependencyExtractor', () => {
 	]);
 
 	expect(extractor.fromIssue(issue)).toEqual(expectedDeps);
+});
+
+test('DependencyExtractor with a keyword that starts another', () => {
+	const repo = {
+		owner: 'github',
+		repo: 'atom',
+	};
+
+	const body = `
+	- depends on: #666
+	- depends on: another/repo#123
+	`;
+
+	const extractor = new DependencyExtractor(repo, [
+		'depends on',
+		'depends on:',
+	]);
+
+	expect(extractor.fromIssue({ body } as Issue)).toEqual([
+		{ ...repo, number: 666 },
+		{ owner: 'another', repo: 'repo', number: 123 },
+	]);
 });
 
 describe('DependencyResolver', () => {
